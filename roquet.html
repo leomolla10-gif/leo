@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Rocket League 2D - Edición Garaje</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #111;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            user-select: none;
+        }
+        #hud {
+            display: none;
+            justify-content: space-between;
+            width: 900px;
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            background: #222;
+            padding: 10px 25px;
+            border-radius: 10px;
+            box-sizing: border-box;
+            border: 2px solid #444;
+        }
+        .blue { color: #00a8ff; }
+        .orange { color: #ff7f00; }
+        .currency { color: #ffdd59; }
+        canvas {
+            border: 4px solid #fff;
+            border-radius: 12px;
+            box-shadow: 0 0 30px rgba(0, 168, 255, 0.3);
+            background-color: #1e272e;
+            display: none;
+        }
+        /* Menús flotantes */
+        .screen {
+            position: absolute;
+            width: 900px;
+            height: 500px;
+            background: rgba(20, 20, 25, 0.95);
+            border: 4px solid #444;
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 40px rgba(0,0,0,0.8);
+            z-index: 10;
+        }
+        h1 { font-size: 48px; margin-bottom: 10px; color: #00a8ff; text-shadow: 0 0 10px rgba(0,168,255,0.5); }
+        p { font-size: 18px; color: #aaa; margin-bottom: 25px; }
+        .btn {
+            background: #00a8ff;
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            font-size: 20px;
+            font-weight: bold;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 8px;
+            transition: 0.2s;
+            box-shadow: 0 4px 10px rgba(0,168,255,0.3);
+        }
+        .btn:hover { background: #0097e6; transform: scale(1.05); }
+        .btn-secondary { background: #444; box-shadow: none; }
+        .btn-secondary:hover { background: #555; }
+        
+        /* Garaje / Tienda */
+        .garage-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+        .color-card {
+            width: 100px;
+            height: 70px;
+            border-radius: 8px;
+            border: 3px solid #555;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: bold;
+            transition: 0.2s;
+        }
+        .color-card:hover { transform: scale(1.05); border-color: #fff; }
+        .color-card.selected { border-color: #ffdd59; box-shadow: 0 0 15px #ffdd59; }
+        .color-card.locked { opacity: 0.5; filter: grayscale(80%); }
+
+        #walletDisplay {
+            position: absolute;
+            top: 25px;
+            right: 40px;
+            font-size: 22px;
+            font-weight: bold;
+            color: #ffdd59;
+            background: rgba(0,0,0,0.5);
+            padding: 8px 15px;
+            border-radius: 20px;
+            border: 1px solid #ffdd59;
+            display: none;
+            z-index: 20;
+        }
+    </style>
+</head>
+<body>
+
+<div id="walletDisplay">🪙 <span id="creditsCount">0</span> Créditos</div>
+
+<!-- MENÚ PRINCIPAL -->
+<div id="mainMenu" class="screen">
+    <h1>ROCKET LEAGUE 2D</h1>
+    <p>¡Gana partidos, consigue créditos y personaliza tu coche!</p>
+    <button class="btn" onclick="startGame()">JUGAR PARTIDO</button>
+    <button class="btn btn-secondary" onclick="openGarage()">GARAJE / TIENDA</button>
+</div>
+
+<!-- GARAJE / PERSONALIZACIÓN -->
+<div id="garageMenu" class="screen" style="display: none;">
+    <h1>GARAJE</h1>
+    <p>Desbloquea y selecciona el color de tu coche</p>
+    <div class="garage-grid" id="colorGrid"></div>
+    <button class="btn btn-secondary" onclick="closeGarage()">VOLVER AL MENÚ</button>
+</div>
+
+<!-- PANTALLA DE FIN DE PARTIDO -->
+<div id="gameOverMenu" class="screen" style="display: none;">
+    <h1 id="gameOverTitle">¡VICTORIA!</h1>
+    <p id="gameOverReward" style="color: #ffdd59; font-size: 22px;"></p>
+    <button class="btn" onclick="startGame()">JUGAR OTRA VEZ</button>
+    <button class="btn btn-secondary" onclick="returnToMenu()">MENÚ PRINCIPAL</button>
+</div>
+
+<!-- HUD DE JUEGO -->
+<div id="hud">
+    <span class="blue">AZUL: <span id="scoreBlue">0</span></span>
+    <span id="timer">02:00</span>
+    <span class="orange">NARANJA: <span id="scoreOrange">0</span></span>
+</div>
+
+<canvas id="gameCanvas" width="900" height="500"></canvas>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// Sistema de Progeso / Economía
+let credits = parseInt(localStorage.getItem('rl_credits')) || 150;
+let unlockedColors = JSON.parse(localStorage.getItem('rl_unlocked')) || ['#00a8ff'];
+let selectedColor = localStorage.getItem('rl_color') || '#00a8ff';
+
+const availableColors = [
+    { name: 'Azul Clásico', color: '#00a8ff', price: 0 },
+    { name: 'Rojo Fuego', color: '#ff3f34', price: 100 },
+    { name: 'Verde Neón', color: '#0be881', price: 150 },
+    { name: 'Morado Pro', color: '#8854d0', price: 200 },
+    { name: 'Rosa Neón', color: '#ef5777', price: 250 },
+    { name: 'Oro Puro', color: '#ffd32a', price: 500 }
+];
+
+function updateWallet() {
+    document.getElementById('creditsCount').innerText = credits;
+    localStorage.setItem('rl_credits', credits);
+    localStorage.setItem('rl_unlocked', JSON.stringify(unlockedColors));
+    localStorage.setItem('rl_color', selectedColor);
+}
+updateWallet();
+
+// Configuración del juego
+const GOAL_WIDTH = 140;
+const GOAL_DEPTH = 25;
+let scoreBlue = 0;
+let scoreOrange = 0;
+let timeLeft = 120;
+let gameState = 'MENU'; // MENU, GARAGE, PLAYING, GAMEOVER
+let goalMessage = "";
+let goalTimer = 0;
+let matchEarnedCredits = 0;
+
+const keys = {};
+window.addEventListener('keydown', e => {
+    keys[e.code] = true;
+    if (e.code === 'KeyR' && gameState === 'PLAYING') resetPositions();
+});
+window.addEventListener('keyup', e => keys[e.code] = false);
+
+let particles = [];
+
+class Car {
+    constructor(x, y, color, isPlayer) {
+        this.startX = x;
+        this.startY = y;
+        this.x = x;
+        this.y = y;
+        this.vx = 0;
+        this.vy = 0;
+        this.angle = isPlayer ? 0 : Math.PI;
+        this.width = 42;
+        this.height = 24;
+        this.color = color;
+        this.isPlayer = isPlayer;
+        this.boost = 100;
+        this.maxSpeed = 6;
+        this.boostSpeed = 10.5;
+    }
+
+    reset() {
+        this.x = this.startX;
+        this.y = this.startY;
+        this.vx = 0;
+        this.vy = 0;
+        this.angle = this.isPlayer ? 0 : Math.PI;
+        this.boost = 100;
+    }
+
+    update() {
+        let boosting = false;
+
+        if (this.isPlayer) {
+            if (keys['KeyW'] || keys['ArrowUp']) {
+                this.vx += Math.cos(this.angle) * 0.35;
+                this.vy += Math.sin(this.angle) * 0.35;
+            }
+            if (keys['KeyS'] || keys['ArrowDown']) {
+                this.vx -= Math.cos(this.angle) * 0.25;
+                this.vy -= Math.sin(this.angle) * 0.25;
+            }
+            
+            const speed = Math.hypot(this.vx, this.vy);
+            if (speed > 0.3) {
+                const turnSpeed = 0.065;
+                if (keys['KeyA'] || keys['ArrowLeft']) this.angle -= turnSpeed;
+                if (keys['KeyD'] || keys['ArrowRight']) this.angle += turnSpeed;
+            }
+
+            if (keys['Space'] && this.boost > 0) {
+                boosting = true;
+                this.vx += Math.cos(this.angle) * 0.65;
+                this.vy += Math.sin(this.angle) * 0.65;
+                this.boost = Math.max(0, this.boost - 1.2);
+            }
+        } else {
+            let targetX = ball.x - 25;
+            let targetY = ball.y;
+
+            if (ball.x > this.x) {
+                targetX = Math.min(canvas.width - 50, ball.x + 60);
+                targetY = ball.y > canvas.height / 2 ? ball.y - 60 : ball.y + 60;
+            }
+
+            const dx = targetX - this.x;
+            const dy = targetY - this.y;
+            const targetAngle = Math.atan2(dy, dx);
+            
+            let diff = targetAngle - this.angle;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            this.angle += diff * 0.08;
+
+            this.vx += Math.cos(this.angle) * 0.32;
+            this.vy += Math.sin(this.angle) * 0.32;
+
+            if (Math.abs(diff) < 0.3 && this.boost > 20 && Math.hypot(dx, dy) > 100) {
+                boosting = true;
+                this.vx += Math.cos(this.angle) * 0.55;
+                this.vy += Math.sin(this.angle) * 0.55;
+                this.boost = Math.max(0, this.boost - 1);
+            }
+        }
+
+        if (!boosting && this.boost < 100) this.boost += 0.15;
+
+        if (boosting) {
+            for (let i = 0; i < 2; i++) {
+                particles.push({
+                    x: this.x - Math.cos(this.angle) * 22,
+                    y: this.y - Math.sin(this.angle) * 22,
+                    vx: -Math.cos(this.angle) * (2 + Math.random() * 2) + (Math.random() - 0.5),
+                    vy: -Math.sin(this.angle) * (2 + Math.random() * 2) + (Math.random() - 0.5),
+                    life: 15,
+                    color: Math.random() > 0.5 ? '#ffdd59' : '#ff5e57'
+                });
+            }
+        }
+
+        this.vx *= 0.94;
+        this.vy *= 0.94;
+        const currentMax = boosting ? this.boostSpeed : this.maxSpeed;
+        const speed = Math.hypot(this.vx, this.vy);
+        if (speed > currentMax) {
+            this.vx = (this.vx / speed) * currentMax;
+            this.vy = (this.vy / speed) * currentMax;
+        }
+
+        this.x += this.vx;
+        this.y += this.vy;
+
+        const margin = 20;
+        if (this.x < margin) { this.x = margin; this.vx *= -0.5; }
+        if (this.x > canvas.width - margin) { this.x = canvas.width - margin; this.vx *= -0.5; }
+        if (this.y < margin) { this.y = margin; this.vy *= -0.5; }
+        if (this.y > canvas.height - margin) { this.y = canvas.height - margin; this.vy *= -0.5; }
+    }
+
+    draw() {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.angle);
+
+        ctx.fillStyle = this.isPlayer ? selectedColor : this.color;
+        ctx.beginPath();
+        ctx.roundRect(-this.width / 2, -this.height / 2, this.width, this.height, 6);
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.fillStyle = '#111';
+        ctx.fillRect(4, -this.height / 2 + 4, 10, this.height - 8);
+
+        ctx.fillStyle = '#333';
+        ctx.fillRect(-this.width / 2 - 2, -this.height / 2 + 2, 5, this.height - 4);
+
+        ctx.restore();
+
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(this.x - 20, this.y + 20, 40, 5);
+        ctx.fillStyle = this.boost > 25 ? '#ffdd59' : '#ff3f34';
+        ctx.fillRect(this.x - 20, this.y + 20, (this.boost / 100) * 40, 5);
+    }
+}
+
+const ball = {
+    x: canvas.width / 2,
+    y: canvas.height / 2,
+    vx: 0,
+    vy: 0,
+    radius: 22,
+    reset() {
+        this.x = canvas.width / 2;
+        this.y = canvas.height / 2;
+        this.vx = 0;
+        this.vy = 0;
+    },
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.vx *= 0.985;
+        this.vy *= 0.985;
+
+        const goalTop = (canvas.height - GOAL_WIDTH) / 2;
+        const goalBottom = (canvas.height + GOAL_WIDTH) / 2;
+
+        if (this.y - this.radius < 0) { this.y = this.radius; this.vy *= -0.85; }
+        if (this.y + this.radius > canvas.height) { this.y = canvas.height - this.radius; this.vy *= -0.85; }
+
+        if (this.x - this.radius < 0) {
+            if (this.y > goalTop && this.y < goalBottom) scoreGoal('ORANGE');
+            else { this.x = this.radius; this.vx *= -0.85; }
+        }
+        if (this.x + this.radius > canvas.width) {
+            if (this.y > goalTop && this.y < goalBottom) scoreGoal('BLUE');
+            else { this.x = canvas.width - this.radius; this.vx *= -0.85; }
+        }
+    },
+    draw() {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.fillStyle = '#dfe6e9';
+        ctx.fill();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#00cec9';
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius * 0.5, 0, Math.PI * 2);
+        ctx.strokeStyle = '#636e72';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.restore();
+    }
+};
+
+const player = new Car(150, canvas.height / 2, selectedColor, true);
+const bot = new Car(canvas.width - 150, canvas.height / 2, '#ff7f00', false);
+
+function checkCollisions() {
+    [player, bot].forEach(car => {
+        const dx = ball.x - car.x;
+        const dy = ball.y - car.y;
+        const dist = Math.hypot(dx, dy);
+        const minDist = ball.radius + 20;
+
+        if (dist < minDist) {
+            const angle = Math.atan2(dy, dx);
+            const overlap = minDist - dist;
+            
+            ball.x += Math.cos(angle) * overlap;
+            ball.y += Math.sin(angle) * overlap;
+
+            const carSpeed = Math.hypot(car.vx, car.vy);
+            const force = Math.max(carSpeed * 1.45, 4);
+            ball.vx = Math.cos(angle) * force + car.vx * 0.5;
+            ball.vy = Math.sin(angle) * force + car.vy * 0.5;
+
+            car.vx *= 0.7;
+            car.vy *= 0.7;
+        }
+    });
+
+    const dx = bot.x - player.x;
+    const dy = bot.y - player.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 36) {
+        const angle = Math.atan2(dy, dx);
+        const overlap = 36 - dist;
+        player.x -= Math.cos(angle) * (overlap / 2);
+        player.y -= Math.sin(angle) * (overlap / 2);
+        bot.x += Math.cos(angle) * (overlap / 2);
+        bot.y += Math.sin(angle) * (overlap / 2);
+
+        const tempVx = player.vx;
+        const tempVy = player.vy;
+        player.vx = bot.vx * 0.8;
+        player.vy = bot.vy * 0.8;
+        bot.vx = tempVx * 0.8;
+        bot.vy = tempVy * 0.8;
+    }
+}
+
+function scoreGoal(team) {
+    if (goalTimer > 0) return;
+    if (team === 'BLUE') {
+        scoreBlue++;
+        document.getElementById('scoreBlue').innerText = scoreBlue;
+        goalMessage = "¡GOL DEL EQUIPO AZUL!";
+        matchEarnedCredits += 50; // +50 créditos por gol del jugador
+    } else {
+        scoreOrange++;
+        document.getElementById('scoreOrange').innerText = scoreOrange;
+        goalMessage = "¡GOL DEL EQUIPO NARANJA!";
+    }
+    goalTimer = 90;
+}
+
+function resetPositions() {
+    player.reset();
+    bot.reset();
+    ball.reset();
+    particles = [];
+}
+
+// Temporizador del partido
+setInterval(() => {
+    if (gameState === 'PLAYING' && goalTimer === 0 && timeLeft > 0) {
+        timeLeft--;
+        const mins = Math.floor(timeLeft / 60).toString().padStart(2, '0');
+        const secs = (timeLeft % 60).toString().padStart(2, '0');
+        document.getElementById('timer').innerText = `${mins}:${secs}`;
+        if (timeLeft === 0) endMatch();
+    }
+}, 1000);
+
+function startGame() {
+    scoreBlue = 0;
+    scoreOrange = 0;
+    timeLeft = 120;
+    goalTimer = 0;
+    matchEarnedCredits = 50; // Premio base por jugar
+    document.getElementById('scoreBlue').innerText = 0;
+    document.getElementById('scoreOrange').innerText = 0;
+    
+    document.getElementById('mainMenu').style.display = 'none';
+    document.getElementById('garageMenu').style.display = 'none';
+    document.getElementById('gameOverMenu').style.display = 'none';
+    document.getElementById('walletDisplay').style.display = 'block';
+    document.getElementById('hud').style.display = 'flex';
+    canvas.style.display = 'block';
+
+    player.color = selectedColor;
+    resetPositions();
+    gameState = 'PLAYING';
+}
+
+function endMatch() {
+    gameState = 'GAMEOVER';
+    canvas.style.display = 'none';
+    document.getElementById('hud').style.display = 'none';
+    
+    let resultText = "¡EMPATE!";
+    let bonus = 50;
+    if (scoreBlue > scoreOrange) {
+        resultText = "¡VICTORIA!";
+        bonus = 150; // Extra por ganar
+    } else if (scoreOrange > scoreBlue) {
+        resultText = "¡DERROTA!";
+        bonus = 20;
+    }
+    
+    matchEarnedCredits += bonus;
+    credits += matchEarnedCredits;
+    updateWallet();
+
+    document.getElementById('gameOverTitle').innerText = resultText;
+    document.getElementById('gameOverReward').innerText = `Has ganado 🪙 +${matchEarnedCredits} créditos en este partido.`;
+    document.getElementById('gameOverMenu').style.display = 'flex';
+}
+
+function returnToMenu() {
+    document.getElementById('gameOverMenu').style.display = 'none';
+    document.getElementById('walletDisplay').style.display = 'none';
+    document.getElementById('mainMenu').style.display = 'flex';
+    gameState = 'MENU';
+}
+
+// Gestión del Garaje
+function openGarage() {
+    document.getElementById('mainMenu').style.display = 'none';
+    document.getElementById('walletDisplay').style.display = 'block';
+    document.getElementById('garageMenu').style.display = 'flex';
+    renderGarage();
+}
+
+function closeGarage() {
+    document.getElementById('garageMenu').style.display = 'none';
+    document.getElementById('walletDisplay').style.display = 'none';
+    document.getElementById('mainMenu').style.display = 'flex';
+}
+
+function renderGarage() {
+    const grid = document.getElementById('colorGrid');
+    grid.innerHTML = '';
+
+    availableColors.forEach(item => {
+        const isUnlocked = unlockedColors.includes(item.color);
+        const isSelected = selectedColor === item.color;
+
+        const card = document.createElement('div');
+        card.className = `color-card ${isUnlocked ? '' : 'locked'} ${isSelected ? 'selected' : ''}`;
+        card.style.backgroundColor = item.color;
+        card.innerHTML = `
+            <span style="background: rgba(0,0,0,0.7); padding: 2px 6px; border-radius: 4px; margin-top: auto; margin-bottom: 5px;">
+                ${isUnlocked ? (isSelected ? 'EQUIPADO' : 'SELECCIONAR') : `🪙 ${item.price}`}
+            </span>
+        `;
+
+        card.onclick = () => {
+            if (isUnlocked) {
+                selectedColor = item.color;
+                updateWallet();
+                renderGarage();
+            } else {
+                if (credits >= item.price) {
+                    credits -= item.price;
+                    unlockedColors.push(item.color);
+                    selectedColor = item.color;
+                    updateWallet();
+                    renderGarage();
+                } else {
+                    alert("¡No tienes suficientes créditos! Juega partidos para ganar más.");
+                }
+            }
+        };
+        grid.appendChild(card);
+    });
+}
+
+function drawField() {
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(canvas.width / 2, 0);
+    ctx.lineTo(canvas.width / 2, canvas.height);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(canvas.width / 2, canvas.height / 2, 70, 0, Math.PI * 2);
+    ctx.stroke();
+
+    const goalTop = (canvas.height - GOAL_WIDTH) / 2;
+    
+    ctx.fillStyle = 'rgba(0, 168, 255, 0.25)';
+    ctx.fillRect(0, goalTop, GOAL_DEPTH, GOAL_WIDTH);
+    ctx.strokeStyle = '#00a8ff';
+    ctx.strokeRect(0, goalTop, GOAL_DEPTH, GOAL_WIDTH);
+
+    ctx.fillStyle = 'rgba(255, 127, 0, 0.25)';
+    ctx.fillRect(canvas.width - GOAL_DEPTH, goalTop, GOAL_DEPTH, GOAL_WIDTH);
+    ctx.strokeStyle = '#ff7f00';
+    ctx.strokeRect(canvas.width - GOAL_DEPTH, goalTop, GOAL_DEPTH, GOAL_WIDTH);
+}
+
+function gameLoop() {
+    if (gameState === 'PLAYING') {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        drawField();
+
+        if (goalTimer > 0) {
+            goalTimer--;
+            if (goalTimer === 0) resetPositions();
+        } else {
+            player.update();
+            bot.update();
+            ball.update();
+            checkCollisions();
+        }
+
+        for (let i = particles.length - 1; i >= 0; i--) {
+            let p = particles[i];
+            p.x += p.vx;
+            p.y += p.vy;
+            p.life--;
+            ctx.fillStyle = p.color;
+            ctx.globalAlpha = p.life / 15;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+            if (p.life <= 0) particles.splice(i, 1);
+        }
+
+        ball.draw();
+        player.draw();
+        bot.draw();
+
+        if (goalTimer > 0) {
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(0, canvas.height / 2 - 40, canvas.width, 80);
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 36px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(goalMessage, canvas.width / 2, canvas.height / 2 + 12);
+        }
+    }
+    requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
+
+</body>
+</html>
